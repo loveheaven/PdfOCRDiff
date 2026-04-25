@@ -496,12 +496,34 @@ export function useOcrDiffProject(): UseOcrDiffProjectReturn {
       if (!manifestFile) throw new Error("无效的 .ocrdiff 文件：缺少 manifest.json");
 
       const manifestJson = await manifestFile.async("text");
-      const loadedManifest: OcrDiffManifest = JSON.parse(manifestJson);
+      // Parse as raw JSON first to detect format
+      const rawManifest = JSON.parse(manifestJson);
 
-      const safeName = loadedManifest.pdf_name.replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, "_");
+      // Normalize old format (version: 1, pages: [...]) to new format (ocrdiff_version: 1, base.pages: [...])
+      let newManifest: OcrDiffManifest;
+      if ("base" in rawManifest && Array.isArray(rawManifest.base?.pages)) {
+        // Already new format
+        newManifest = rawManifest as OcrDiffManifest;
+      } else if ("pages" in rawManifest && Array.isArray(rawManifest.pages)) {
+        // Old flat format — normalize to new format
+        newManifest = {
+          ocrdiff_version: rawManifest.version ?? 1,
+          pdf_name: rawManifest.pdf_name,
+          dpi: rawManifest.dpi ?? 200,
+          source: "imported",
+          total_pages: rawManifest.total_pages,
+          created_at: rawManifest.created_at,
+          base: { pages: rawManifest.pages },
+          edits: [],
+        };
+      } else {
+        throw new Error("无效的 manifest：既不是旧格式也不是新格式");
+      }
+
+      const safeName = newManifest.pdf_name.replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, "_");
       const folderName = `${safeName}_import_${Date.now()}`;
 
-      await dbPut(STORE_MANIFEST, { projectPath: folderName, ...loadedManifest }, folderName);
+      await dbPut(STORE_MANIFEST, { projectPath: folderName, ...newManifest }, folderName);
 
       const images = new Map<number, string>();
       for (const [name, zipEntry] of Object.entries(zip.files)) {
@@ -516,7 +538,7 @@ export function useOcrDiffProject(): UseOcrDiffProjectReturn {
       }
 
       setProjectPath(folderName);
-      setManifest(loadedManifest);
+      setManifest(newManifest);
       setPageImages(images);
       pendingTextRef.current = new Map();
       setPendingText(new Map());

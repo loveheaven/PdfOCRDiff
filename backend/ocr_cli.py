@@ -49,16 +49,11 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-# Disable PaddleX PIR executor to avoid unimplemented PIR conversion errors
-os.environ["FLAGS_enable_pir_api"] = "0"
-
 import fitz  # PyMuPDF
 import numpy as np
 from PIL import Image
 import io
 
-import transformers
-print(f"Transformers版本: {transformers.__version__}")
 
 def create_ocr_engine(lang: str, engine: str, device: str):
     """Create PaddleOCR instance."""
@@ -88,24 +83,24 @@ def ocr_png_bytes(ocr, png_bytes: bytes):
     image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     img_array = np.array(image)
 
-    # predict() returns an iterable of result objects; print(result) emits result.json
+    # Use ocr() method which returns [(box, (text, score)), ...]
+    # This avoids the PIR bug in predict() API
     results = ocr.predict(img_array)
+    # print(results)
 
     boxes, texts, scores = [], [], []
-    for res in results:
-        json_data = res.json
-        # rec_polys: filtered detection boxes (after score threshold), shape (4, 2), dtype int16
-        # rec_texts: recognized texts (already filtered by text_rec_score_thresh)
-        # rec_scores: confidence scores corresponding to rec_texts
-        if "rec_polys" in json_data and "rec_texts" in json_data and "rec_scores" in json_data:
+    if results:
+        for line in results:
             for poly, text, score in zip(
-                json_data["rec_polys"],
-                json_data["rec_texts"],
-                json_data["rec_scores"],
+                line["rec_polys"],
+                line["rec_texts"],
+                line["rec_scores"],
             ):
                 # poly is numpy array shape (4, 2), dtype int16
-                boxes.append([[float(p[0]), float(p[1])] for p in poly])
+                boxes.append([[int(p[0]), int(p[1])] for p in poly])
                 texts.append(text)
+                # print(text, len(poly), boxes)
+
                 scores.append(float(score))
     return boxes, texts, scores
 

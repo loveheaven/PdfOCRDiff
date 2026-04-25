@@ -5,13 +5,14 @@ PDF OCR 对比工具 — 将 PDF 通过 PaddleOCR 进行文字识别，并与 EP
 ## 架构
 
 - **前端**: Tauri 2.0 + React + Vite + Tailwind CSS（Mac 原生客户端）
-- **后端**: FastAPI + PaddleOCR + PyMuPDF + ebooklib
+- **后端**: FastAPI + PaddleOCR + PyMuPDF（**仅负责 OCR**）
+- **前端本地处理**: EPUB 解析（JSZip）+ 文本 Diff（diff-match-patch）
 
 详见 [DESIGN.md](./DESIGN.md)。
 
 ## 快速开始
 
-### 后端
+### 后端（仅 OCR 服务）
 
 ```bash
 cd backend
@@ -25,7 +26,7 @@ python main.py
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-后端默认运行在 `http://localhost:8000`。
+后端默认运行在 `http://localhost:8000`，可部署在本地或远程 GPU 服务器。
 
 ### 前端
 
@@ -43,14 +44,17 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-### 配置后端地址
+### 配置
 
-在应用顶部栏可以配置后端 URL：
-- 本地: `http://localhost:8000`
-- 远程: `http://your-gpu-server:8000`
+点击右上角 ⚙ 设置按钮，可配置：
+- **后端 OCR 地址**: 本地 `http://localhost:8000` 或远程 `http://your-gpu-server:8000`
+- **中间列保存路径**
+- **自动保存间隔**（默认 10 秒）
 
 ## 使用流程
 
-1. 左栏上传 PDF → 点击开始 OCR → 逐页显示图像和识别文字
-2. 右栏上传 EPUB → 显示参考文字
-3. 中栏自动对比 OCR 结果和 EPUB 文字，差异用红框标注
+1. **左栏**: 上传 PDF → 逐页显示大图，支持暂停/继续 OCR
+2. **中栏**: 自动填入 OCR 文字，可编辑、自动保存、版本历史可回退
+3. **右栏**: 选择 EPUB 文件 → 前端本地解析，显示参考文字
+4. **Diff**: 中栏和右栏自动实时对比，差异用红框标注（前端本地计算，毫秒级）
+5. 点击左栏某页图片 → 中栏自动滚动到对应文字位置

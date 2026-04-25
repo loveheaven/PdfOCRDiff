@@ -1,4 +1,4 @@
-"""FastAPI backend for PdfOCRDiff."""
+"""FastAPI backend for PdfOCRDiff – OCR only."""
 
 import asyncio
 import json
@@ -10,15 +10,12 @@ from typing import Dict
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 import config
 from pdf_service import get_page_count, render_page_to_png, render_page_to_base64
 from ocr_service import ocr_image_bytes
-from epub_parser import parse_epub
-from diff_service import compute_diff
 
-app = FastAPI(title="PdfOCRDiff Backend", version="0.1.0")
+app = FastAPI(title="PdfOCRDiff Backend", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -217,40 +214,6 @@ async def ocr_status(task_id: str):
         "paused": state.paused,
         "done": state.is_done,
     }
-
-
-# ---------- EPUB ----------
-
-@app.post("/epub/upload")
-async def epub_upload(file: UploadFile = File(...)):
-    """Upload an EPUB file and return parsed chapter texts."""
-    if not file.filename or not file.filename.lower().endswith(".epub"):
-        raise HTTPException(400, "Only EPUB files are accepted")
-
-    task_id = str(uuid.uuid4())
-    task_dir = Path(config.UPLOAD_DIR) / task_id
-    task_dir.mkdir(parents=True, exist_ok=True)
-
-    epub_path = task_dir / "input.epub"
-    content = await file.read()
-    epub_path.write_bytes(content)
-
-    chapters = parse_epub(str(epub_path))
-    return {"chapters": chapters}
-
-
-# ---------- Diff ----------
-
-class DiffRequest(BaseModel):
-    text_a: str
-    text_b: str
-
-
-@app.post("/diff")
-async def diff_texts(req: DiffRequest):
-    """Compute diff between two texts."""
-    diffs = compute_diff(req.text_a, req.text_b)
-    return {"diffs": diffs}
 
 
 # ---------- Health ----------

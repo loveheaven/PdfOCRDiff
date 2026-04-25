@@ -99,7 +99,7 @@ function App() {
             currentChapter={epubChapter}
             isLoading={epub.isLoading}
             error={epub.error}
-            onUpload={(file) => epub.uploadEpub(file)}
+            onUpload={(file) => epub.loadEpub(file)}
             onChapterChange={setEpubChapter}
           />
           <div className="flex-1 min-h-0">

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { getBackendUrl } from "../config";
+import DiffMatchPatch from "diff-match-patch";
 
 export interface DiffSegment {
   type: "equal" | "delete" | "insert" | "replace";
@@ -11,10 +11,16 @@ export interface DiffSegment {
 interface UseDiffReturn {
   diffs: DiffSegment[];
   isComputing: boolean;
-  computeDiff: (textA: string, textB: string) => Promise<void>;
+  computeDiff: (textA: string, textB: string) => void;
   reset: () => void;
 }
 
+const dmp = new DiffMatchPatch();
+
+/**
+ * Compute character-level diff entirely in the browser using diff-match-patch.
+ * No backend needed.
+ */
 export function useDiff(): UseDiffReturn {
   const [diffs, setDiffs] = useState<DiffSegment[]>([]);
   const [isComputing, setIsComputing] = useState(false);
@@ -24,23 +30,41 @@ export function useDiff(): UseDiffReturn {
     setIsComputing(false);
   }, []);
 
-  const computeDiff = useCallback(async (textA: string, textB: string) => {
+  const computeDiff = useCallback((textA: string, textB: string) => {
     setIsComputing(true);
-    const backendUrl = getBackendUrl();
 
     try {
-      const res = await fetch(`${backendUrl}/diff`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text_a: textA, text_b: textB }),
-      });
+      const rawDiffs = dmp.diff_main(textA, textB);
+      dmp.diff_cleanupSemantic(rawDiffs);
 
-      if (!res.ok) {
-        throw new Error(`Diff failed: ${res.statusText}`);
+      const segments: DiffSegment[] = [];
+      let i = 0;
+
+      while (i < rawDiffs.length) {
+        const [op, text] = rawDiffs[i];
+
+        if (op === 0) {
+          // Equal
+          segments.push({ type: "equal", text });
+          i++;
+        } else if (op === -1 && i + 1 < rawDiffs.length && rawDiffs[i + 1][0] === 1) {
+          // Delete followed by Insert → Replace
+          segments.push({ type: "replace", text_a: text, text_b: rawDiffs[i + 1][1] });
+          i += 2;
+        } else if (op === -1) {
+          // Delete only
+          segments.push({ type: "delete", text });
+          i++;
+        } else if (op === 1) {
+          // Insert only
+          segments.push({ type: "insert", text });
+          i++;
+        } else {
+          i++;
+        }
       }
 
-      const { diffs } = await res.json();
-      setDiffs(diffs);
+      setDiffs(segments);
     } catch {
       setDiffs([]);
     } finally {

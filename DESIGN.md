@@ -10,10 +10,10 @@
 |------|------|------|
 | **前端框架** | Tauri 2.0 + React + Vite + TypeScript | Mac 原生客户端 (.app/.dmg) |
 | **前端 UI** | Tailwind CSS | 三栏布局、响应式 |
-| **后端** | FastAPI (Python) | 提供 OCR、EPUB 解析、Diff 服务 |
+| **前端 EPUB 解析** | JSZip + DOMParser | 浏览器本地解析 EPUB，无需后端 |
+| **前端文本 Diff** | diff-match-patch (Google) | 浏览器本地逐字对比，毫秒级 |
+| **后端** | FastAPI (Python) | 仅提供 OCR 服务（PDF→图片→文字） |
 | **OCR 引擎** | PaddleOCR | 后端直接调用本机模型 |
-| **EPUB 解析** | ebooklib + BeautifulSoup4 | 提取 EPUB 中的纯文本 |
-| **文本 Diff** | difflib (Python) | 逐字/逐词对比，返回差异区间 |
 | **PDF 处理** | PyMuPDF (fitz) | PDF 转页面图片 |
 
 ## 部署模型
@@ -26,11 +26,10 @@
 前端只需在设置中配置后端 URL 即可切换。
 
 ```
-前端 (Tauri App) ──HTTP/SSE──→ 后端 (FastAPI)
-                                  │
-                                  ├─ PaddleOCR (本机模型)
-                                  ├─ PyMuPDF (PDF→图片)
-                                  └─ ebooklib (EPUB解析)
+前端 (Tauri App) ──HTTP/SSE──→ 后端 (FastAPI) ── OCR only
+    │                              │
+    ├─ JSZip (EPUB解析)            ├─ PaddleOCR (本机模型)
+    └─ diff-match-patch (Diff)     └─ PyMuPDF (PDF→图片)
 ```
 
 ## 架构图
@@ -57,30 +56,26 @@
 │  └──────────┘ └───────────────────┘ └──────────────────┘ │
 │                                                           │
 │  设置弹窗: 后端URL / 保存路径 / 自动保存间隔               │
-└──────────┬────────────────────────────────┬───────────────┘
-           │ POST /ocr/upload          │ POST /epub/upload
-           │ GET  /ocr/stream/{id}     │ GET  /diff
-           │ POST /ocr/pause/{id}      │
-           │ POST /ocr/resume/{id}     │
-           │ GET  /ocr/status/{id}     │
-           │ (SSE 逐页推送)             │
-           ▼                           ▼
+│  前端本地: EPUB解析(JSZip) + Diff(diff-match-patch)        │
+└──────────┬────────────────────────────────────────────────┘
+           │ POST /ocr/upload
+           │ GET  /ocr/stream/{id}  (SSE 逐页推送)
+           │ POST /ocr/pause/{id}
+           │ POST /ocr/resume/{id}
+           │ GET  /ocr/status/{id}
+           ▼
 ┌──────────────────────────────────────────────────┐
-│  FastAPI 后端                                     │
+│  FastAPI 后端 (仅 OCR)                            │
 │                                                  │
 │  /ocr/upload     → 接收 PDF，存储，返回任务 ID     │
 │  /ocr/stream/id  → SSE 逐页返回 {page,image,text} │
 │  /ocr/pause/id   → 暂停 OCR 任务                  │
 │  /ocr/resume/id  → 继续 OCR 任务                  │
 │  /ocr/status/id  → 查询任务进度和状态              │
-│  /epub/upload    → 接收 EPUB，解析返回各页文字      │
-│  /diff           → 接收两段文字，返回差异区间       │
 │                                                  │
 │  内部调用:                                        │
 │  - PyMuPDF: PDF → 逐页 PNG 图片                   │
 │  - PaddleOCR: 图片 → 文字识别结果                  │
-│  - ebooklib: EPUB → 章节纯文本                    │
-│  - difflib: 文本 A vs 文本 B → 差异列表            │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -118,23 +113,17 @@
 - 查询任务状态
 - 返回: `{ "task_id": "...", "total_pages": 10, "completed": 3, "completed_pages": [0,1,2], "paused": false, "done": false }`
 
-### POST `/epub/upload`
-- 上传 EPUB 文件
-- 返回: `{ "chapters": [{"title": "...", "text": "..."}, ...] }`
+## 前端本地处理
 
-### POST `/diff`
-- 请求: `{ "text_a": "OCR文字", "text_b": "EPUB文字" }`
-- 返回:
-```json
-{
-  "diffs": [
-    {"type": "equal", "text": "相同文字"},
-    {"type": "delete", "text": "仅A有"},
-    {"type": "insert", "text": "仅B有"},
-    {"type": "replace", "text_a": "A版本", "text_b": "B版本"}
-  ]
-}
-```
+### EPUB 解析（前端 JSZip + DOMParser）
+- 用户选择 EPUB 文件后，前端直接用 JSZip 解压，DOMParser 解析 HTML 内容
+- 按 OPF spine 顺序提取各章节纯文本
+- 无需上传到后端，离线也能用
+
+### 文本 Diff（前端 diff-match-patch）
+- 使用 Google diff-match-patch 库在浏览器本地计算逐字差异
+- 编辑文本后毫秒级实时对比，无网络延迟
+- 输出格式: equal / delete / insert / replace 四种类型
 
 ## 目录结构
 
@@ -158,8 +147,8 @@ PdfOCRDiff/
 │   │   │   └── SettingsDialog.tsx # 设置弹窗（后端URL/保存路径/自动保存间隔）
 │   │   └── hooks/
 │   │       ├── useOcrStream.ts    # SSE 连接 + 暂停/继续
-│   │       ├── useEpub.ts         # EPUB 上传解析
-│   │       ├── useDiff.ts         # 文本对比
+│   │       ├── useEpub.ts         # EPUB 本地解析 (JSZip)
+│   │       ├── useDiff.ts         # 本地文本对比 (diff-match-patch)
 │   │       └── useEditorStore.ts  # 可编辑文本 + 自动保存 + 版本历史
 │   ├── src-tauri/                 # Tauri 原生层
 │   │   ├── tauri.conf.json
@@ -170,12 +159,10 @@ PdfOCRDiff/
 │   ├── package.json
 │   └── vite.config.ts
 │
-├── backend/               # FastAPI
+├── backend/               # FastAPI (仅 OCR)
 │   ├── main.py            # FastAPI 应用入口（含 task 状态管理）
 │   ├── ocr_service.py     # PaddleOCR 封装
 │   ├── pdf_service.py     # PyMuPDF: PDF → 图片
-│   ├── epub_parser.py     # EPUB 解析
-│   ├── diff_service.py    # 文本 Diff
 │   ├── config.py          # 配置
 │   └── requirements.txt
 │
@@ -209,16 +196,17 @@ PdfOCRDiff/
 5. **编辑/预览切换**: "编辑"按钮切换为 textarea 编辑模式，"预览"按钮切换回 diff 高亮视图
 6. 预览模式下所有页面文字上下排列，带页码分隔符
 
-### EPUB 流程
-1. 用户在右栏上传 EPUB
-2. 前端 POST `/epub/upload`
-3. 后端解析 EPUB，返回所有章节文字
-4. 右栏显示 EPUB 文字
+### EPUB 流程（前端本地）
+1. 用户在右栏选择 EPUB 文件
+2. 前端用 JSZip 解压 → DOMParser 解析 HTML → 提取纯文本
+3. 按 OPF spine 顺序分章节展示在右栏
+4. 无需后端参与，离线可用
 
-### Diff 流程
+### Diff 流程（前端本地）
 1. 当某页 OCR 文字（可能已编辑）和对应 EPUB 文字都就绪时
-2. 前端 POST `/diff`（或前端本地 diff）
+2. 前端用 diff-match-patch 实时计算逐字差异
 3. 中栏和右栏同时用红框/红色背景标注差异文字
+4. 编辑文字后自动重新 diff，毫秒级响应
 
 ### 设置
 - 右上角 ⚙ 按钮打开设置弹窗
@@ -231,7 +219,8 @@ PdfOCRDiff/
 ## 开发计划
 
 1. **Phase 1** ✅: 搭建 Tauri 2.0 + React 前端骨架 + 三栏布局
-2. **Phase 2** ✅: 搭建 FastAPI 后端 + OCR 服务 + EPUB 解析
+2. **Phase 2** ✅: 搭建 FastAPI 后端 + OCR 服务
 3. **Phase 3** ✅: 前后端联调 (SSE + Diff 高亮 + 暂停/继续)
 4. **Phase 4** ✅: 中栏可编辑 + 自动保存 + 版本历史 + 设置弹窗
-5. **Phase 5**: 打包为 Mac 应用 (.dmg)
+5. **Phase 5** ✅: EPUB 解析 + Diff 移到前端本地（后端仅 OCR）
+6. **Phase 6**: 打包为 Mac 应用 (.dmg)

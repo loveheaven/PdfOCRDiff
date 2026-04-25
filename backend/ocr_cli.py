@@ -42,11 +42,15 @@ Output:
 
 import argparse
 import json
+import os
 import sys
 import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
+
+# Disable PaddleX PIR executor to avoid unimplemented PIR conversion errors
+os.environ["FLAGS_enable_pir_api"] = "0"
 
 import fitz  # PyMuPDF
 import numpy as np

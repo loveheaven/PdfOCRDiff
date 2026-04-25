@@ -1,0 +1,29 @@
+# Dependencies
+frontend/node_modules/
+backend/__pycache__/
+backend/*.pyc
+backend/.venv/
+
+# Build outputs
+frontend/dist/
+frontend/src-tauri/target/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Uploads
+/tmp/pdfocrdiff/
+
+# Env
+.env
+.env.local
+
+# CodeBuddy
+.codebuddy/

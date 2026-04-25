@@ -1,0 +1,237 @@
+# PdfOCRDiff — 架构设计文档
+
+## 项目概述
+
+一个 PDF OCR 对比工具，用于将 PDF 通过 PaddleOCR 进行文字识别，并与已有的 EPUB（他人识别结果）进行逐页文本对比，高亮差异。
+
+## 技术栈
+
+| 层级 | 技术 | 说明 |
+|------|------|------|
+| **前端框架** | Tauri 2.0 + React + Vite + TypeScript | Mac 原生客户端 (.app/.dmg) |
+| **前端 UI** | Tailwind CSS | 三栏布局、响应式 |
+| **后端** | FastAPI (Python) | 提供 OCR、EPUB 解析、Diff 服务 |
+| **OCR 引擎** | PaddleOCR | 后端直接调用本机模型 |
+| **EPUB 解析** | ebooklib + BeautifulSoup4 | 提取 EPUB 中的纯文本 |
+| **文本 Diff** | difflib (Python) | 逐字/逐词对比，返回差异区间 |
+| **PDF 处理** | PyMuPDF (fitz) | PDF 转页面图片 |
+
+## 部署模型
+
+后端只有一套代码。部署在哪台机器，就调用那台机器上的 PaddleOCR 模型。
+
+- **本地部署**: 后端跑在本机，前端配置 `http://localhost:8000`
+- **远程部署**: 后端跑在 GPU 服务器，前端配置 `http://gpu-server:8000`
+
+前端只需在设置中配置后端 URL 即可切换。
+
+```
+前端 (Tauri App) ──HTTP/SSE──→ 后端 (FastAPI)
+                                  │
+                                  ├─ PaddleOCR (本机模型)
+                                  ├─ PyMuPDF (PDF→图片)
+                                  └─ ebooklib (EPUB解析)
+```
+
+## 架构图
+
+```
+┌───────────────────────────────────────────────────────────┐
+│  Tauri 2.0 Mac App                          [⚙ 设置]     │
+│  React + Vite + Tailwind CSS                              │
+│                                                           │
+│  ┌──────────┐ ┌───────────────────┐ ┌──────────────────┐ │
+│  │ 左栏 1/4  │ │ 中栏 3/8          │ │ 右栏 3/8          │ │
+│  │           │ │                   │ │                  │ │
+│  │ 上传 PDF  │ │ OCR 文字 (可编辑)  │ │ 上传 EPUB        │ │
+│  │ 暂停/继续 │ │ 自动保存+版本历史  │ │ EPUB 文字显示     │ │
+│  │ 3/10 进度 │ │ diff 高亮         │ │ diff 高亮        │ │
+│  │           │ │ [编辑][保存][历史] │ │                  │ │
+│  │ ┌──────┐  │ │                   │ │                  │ │
+│  │ │ 大图 │  │ │ ──第1页──         │ │                  │ │
+│  │ │ P.1  │  │ │ 文字内容...       │ │                  │ │
+│  │ ├──────┤  │ │ ──第2页──         │ │                  │ │
+│  │ │ 大图 │  │ │ 文字内容...       │ │                  │ │
+│  │ │ P.2  │  │ │                   │ │                  │ │
+│  │ └──────┘  │ │                   │ │                  │ │
+│  └──────────┘ └───────────────────┘ └──────────────────┘ │
+│                                                           │
+│  设置弹窗: 后端URL / 保存路径 / 自动保存间隔               │
+└──────────┬────────────────────────────────┬───────────────┘
+           │ POST /ocr/upload          │ POST /epub/upload
+           │ GET  /ocr/stream/{id}     │ GET  /diff
+           │ POST /ocr/pause/{id}      │
+           │ POST /ocr/resume/{id}     │
+           │ GET  /ocr/status/{id}     │
+           │ (SSE 逐页推送)             │
+           ▼                           ▼
+┌──────────────────────────────────────────────────┐
+│  FastAPI 后端                                     │
+│                                                  │
+│  /ocr/upload     → 接收 PDF，存储，返回任务 ID     │
+│  /ocr/stream/id  → SSE 逐页返回 {page,image,text} │
+│  /ocr/pause/id   → 暂停 OCR 任务                  │
+│  /ocr/resume/id  → 继续 OCR 任务                  │
+│  /ocr/status/id  → 查询任务进度和状态              │
+│  /epub/upload    → 接收 EPUB，解析返回各页文字      │
+│  /diff           → 接收两段文字，返回差异区间       │
+│                                                  │
+│  内部调用:                                        │
+│  - PyMuPDF: PDF → 逐页 PNG 图片                   │
+│  - PaddleOCR: 图片 → 文字识别结果                  │
+│  - ebooklib: EPUB → 章节纯文本                    │
+│  - difflib: 文本 A vs 文本 B → 差异列表            │
+└──────────────────────────────────────────────────┘
+```
+
+## API 设计
+
+### POST `/ocr/upload`
+- 上传 PDF 文件
+- 返回: `{ "task_id": "uuid", "total_pages": 10 }`
+
+### GET `/ocr/stream/{task_id}?start_page=0`
+- SSE 流式推送，每识别完一页推送一条:
+```json
+{
+  "page": 0,
+  "total_pages": 10,
+  "image": "data:image/png;base64,...",
+  "text": "识别出的文字内容...",
+  "boxes": [[x1,y1,x2,y2], ...],
+  "scores": [0.99, ...]
+}
+```
+- 暂停时推送: `{ "paused": true, "completed": 3, "total_pages": 10 }`
+- 完成时推送: `{ "done": true, "completed": 10, "total_pages": 10 }`
+- `start_page` 参数用于继续时跳过已完成页
+
+### POST `/ocr/pause/{task_id}`
+- 暂停 OCR 任务
+- 返回: `{ "status": "paused", "completed": 3, "total_pages": 10 }`
+
+### POST `/ocr/resume/{task_id}`
+- 继续 OCR 任务
+- 返回: `{ "status": "resumed", "completed": 3, "total_pages": 10 }`
+
+### GET `/ocr/status/{task_id}`
+- 查询任务状态
+- 返回: `{ "task_id": "...", "total_pages": 10, "completed": 3, "completed_pages": [0,1,2], "paused": false, "done": false }`
+
+### POST `/epub/upload`
+- 上传 EPUB 文件
+- 返回: `{ "chapters": [{"title": "...", "text": "..."}, ...] }`
+
+### POST `/diff`
+- 请求: `{ "text_a": "OCR文字", "text_b": "EPUB文字" }`
+- 返回:
+```json
+{
+  "diffs": [
+    {"type": "equal", "text": "相同文字"},
+    {"type": "delete", "text": "仅A有"},
+    {"type": "insert", "text": "仅B有"},
+    {"type": "replace", "text_a": "A版本", "text_b": "B版本"}
+  ]
+}
+```
+
+## 目录结构
+
+```
+PdfOCRDiff/
+├── DESIGN.md              # 本文档
+├── README.md
+│
+├── frontend/              # Tauri 2.0 + React + Vite
+│   ├── src/
+│   │   ├── App.tsx                # 主应用（三栏布局 + 状态串联）
+│   │   ├── main.tsx               # React 入口
+│   │   ├── index.css              # Tailwind v4 全局样式
+│   │   ├── config.ts              # 配置（后端URL/保存路径/自动保存间隔）
+│   │   ├── components/
+│   │   │   ├── PdfPanel.tsx       # 左栏: PDF 上传 + 逐页大图列表
+│   │   │   ├── EditablePanel.tsx  # 中栏: 可编辑 OCR 文字 + 版本历史 + diff 高亮
+│   │   │   ├── DiffPanel.tsx      # 右栏: EPUB 文字 + diff 高亮（只读）
+│   │   │   ├── EpubPanel.tsx      # 右栏顶部: EPUB 上传 + 章节选择
+│   │   │   ├── SettingsBar.tsx    # 顶部栏（标题 + 设置按钮）
+│   │   │   └── SettingsDialog.tsx # 设置弹窗（后端URL/保存路径/自动保存间隔）
+│   │   └── hooks/
+│   │       ├── useOcrStream.ts    # SSE 连接 + 暂停/继续
+│   │       ├── useEpub.ts         # EPUB 上传解析
+│   │       ├── useDiff.ts         # 文本对比
+│   │       └── useEditorStore.ts  # 可编辑文本 + 自动保存 + 版本历史
+│   ├── src-tauri/                 # Tauri 原生层
+│   │   ├── tauri.conf.json
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       └── main.rs
+│   ├── index.html
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── backend/               # FastAPI
+│   ├── main.py            # FastAPI 应用入口（含 task 状态管理）
+│   ├── ocr_service.py     # PaddleOCR 封装
+│   ├── pdf_service.py     # PyMuPDF: PDF → 图片
+│   ├── epub_parser.py     # EPUB 解析
+│   ├── diff_service.py    # 文本 Diff
+│   ├── config.py          # 配置
+│   └── requirements.txt
+│
+└── .gitignore
+```
+
+## 核心流程
+
+### OCR 流程
+1. 用户在左栏上传 PDF
+2. 前端 POST `/ocr/upload`，获得 `task_id` 和 `total_pages`
+3. 前端连接 SSE `/ocr/stream/{task_id}`
+4. 后端逐页: PDF→图片→PaddleOCR→文字，通过 SSE 推送
+5. 前端收到一页: 左栏显示缩略图，中栏显示文字，按 page 号保存到 Map
+6. **暂停**: 用户点暂停 → 前端 POST `/ocr/pause/{task_id}` → 后端停止处理未完成页
+7. **继续**: 用户点继续 → 前端 POST `/ocr/resume/{task_id}` → 重连 SSE，从已完成页数后继续
+8. 每页 OCR 结果同时持久化到磁盘 (`{upload_dir}/{task_id}/results/page_NNNN.json`)
+9. 按钮状态: `上传 PDF` → `暂停`(识别中) → `继续`(已暂停) → `重新上传`(完成)
+10. 进度显示: 标题旁显示 `已完成页/总页数`，进度条颜色随状态变化
+
+### 左栏交互
+- 所有已识别的页面以完整大图纵向排列，一页一页展示
+- 每页图片上方有页码分隔标签，选中页蓝色左边框 + 蓝色标签高亮
+- 点击某页图片 → 中栏自动滚动到该页对应文字位置
+
+### 中栏编辑 + 版本历史
+1. OCR 结果自动填入中栏，每页文字可编辑
+2. **自动保存**: 每 N 秒（可配置，默认 10s）自动保存所有脏页，版本号 +1
+3. **手动保存**: 点击"保存"按钮立即保存当前页
+4. **版本历史**: 右上角"历史"按钮弹出版本列表（按时间倒序），点击可恢复到该版本
+5. **编辑/预览切换**: "编辑"按钮切换为 textarea 编辑模式，"预览"按钮切换回 diff 高亮视图
+6. 预览模式下所有页面文字上下排列，带页码分隔符
+
+### EPUB 流程
+1. 用户在右栏上传 EPUB
+2. 前端 POST `/epub/upload`
+3. 后端解析 EPUB，返回所有章节文字
+4. 右栏显示 EPUB 文字
+
+### Diff 流程
+1. 当某页 OCR 文字（可能已编辑）和对应 EPUB 文字都就绪时
+2. 前端 POST `/diff`（或前端本地 diff）
+3. 中栏和右栏同时用红框/红色背景标注差异文字
+
+### 设置
+- 右上角 ⚙ 按钮打开设置弹窗
+- 可配置项:
+  - 后端 OCR 服务地址（本地或远程）
+  - 中间列保存路径
+  - 自动保存间隔（秒）
+- 所有设置持久化到 localStorage
+
+## 开发计划
+
+1. **Phase 1** ✅: 搭建 Tauri 2.0 + React 前端骨架 + 三栏布局
+2. **Phase 2** ✅: 搭建 FastAPI 后端 + OCR 服务 + EPUB 解析
+3. **Phase 3** ✅: 前后端联调 (SSE + Diff 高亮 + 暂停/继续)
+4. **Phase 4** ✅: 中栏可编辑 + 自动保存 + 版本历史 + 设置弹窗
+5. **Phase 5**: 打包为 Mac 应用 (.dmg)

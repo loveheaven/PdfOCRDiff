@@ -20,6 +20,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState(0);
   const [epubChapter, setEpubChapter] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showComparePanel, setShowComparePanel] = useState(false);
 
   // Determine data source
   const useProjectSource = ocrProject.hasProject;
@@ -126,6 +127,8 @@ function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onLoadOcrDiff={handleLoadOcrDiff}
         onExport={ocrProject.hasManifest ? ocrProject.exportZip : undefined}
+        onToggleCompare={() => setShowComparePanel((v) => !v)}
+        isCompareActive={showComparePanel}
         ocrDiffLoading={ocrProject.isLoading || ocrProject.isSaving}
         ocrDiffName={ocrProject.manifest?.pdf_name ?? null}
         isProjectMode={ocrProject.hasProject}
@@ -151,7 +154,7 @@ function App() {
         </div>
 
         {/* Middle: Editable OCR text */}
-        <div className="w-[37.5%] border-r border-gray-300 flex flex-col min-h-0">
+        <div className="flex-1 border-r border-gray-300 flex flex-col min-h-0">
           <EditablePanel
             text={currentEditorText}
             onTextChange={handleTextChange}
@@ -170,25 +173,27 @@ function App() {
         </div>
 
         {/* Right: EPUB upload + text with diff highlights */}
-        <div className="w-[37.5%] flex flex-col min-h-0">
-          <EpubPanel
-            chapters={epub.chapters}
-            currentChapter={epubChapter}
-            isLoading={epub.isLoading}
-            error={epub.error}
-            onUpload={(file) => epub.loadEpub(file)}
-            onChapterChange={setEpubChapter}
-          />
-          <div className="flex-1 min-h-0">
-            <DiffPanel
-              ocrText={currentEpubText}
-              diffs={diff.diffs}
-              isComputing={diff.isComputing}
-              side="b"
-              title="EPUB 参考文字"
+        {showComparePanel && (
+          <div className="w-[37.5%] flex flex-col min-h-0">
+            <EpubPanel
+              chapters={epub.chapters}
+              currentChapter={epubChapter}
+              isLoading={epub.isLoading}
+              error={epub.error}
+              onUpload={(file) => epub.loadEpub(file)}
+              onChapterChange={setEpubChapter}
             />
+            <div className="flex-1 min-h-0">
+              <DiffPanel
+                ocrText={currentEpubText}
+                diffs={diff.diffs}
+                isComputing={diff.isComputing}
+                side="b"
+                title="EPUB 参考文字"
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

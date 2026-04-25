@@ -59,11 +59,11 @@ def create_ocr_engine(lang: str, engine: str, device: str):
     from paddleocr import PaddleOCR
     return PaddleOCR(
         lang=lang,
-        engine=engine,
-        device=device,
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=False,
+        # engine and device are ignored here; the classic ocr() API
+        # routes to the appropriate backend automatically.
     )
 
 
@@ -80,20 +80,19 @@ def ocr_png_bytes(ocr, png_bytes: bytes):
     """Run OCR on PNG bytes, return (boxes, texts, scores)."""
     image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     img_array = np.array(image)
-    results = ocr.predict(img_array)
+
+    # Use ocr() method which returns [(box, (text, score)), ...]
+    # This avoids the PIR bug in predict() API
+    results = ocr.ocr(img_array)
 
     boxes, texts, scores = [], [], []
-    for res in results:
-        json_data = res.json
-        if "rec_texts" in json_data and "rec_scores" in json_data and "dt_polys" in json_data:
-            for text, score, poly in zip(
-                json_data["rec_texts"],
-                json_data["rec_scores"],
-                json_data["dt_polys"],
-            ):
-                texts.append(text)
-                scores.append(float(score))
-                boxes.append([[float(p[0]), float(p[1])] for p in poly])
+    if results and results[0]:
+        for line in results[0]:
+            poly = line[0]  # [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+            text, score = line[1]
+            boxes.append([[float(p[0]), float(p[1])] for p in poly])
+            texts.append(text)
+            scores.append(float(score))
     return boxes, texts, scores
 
 

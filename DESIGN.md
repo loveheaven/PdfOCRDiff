@@ -212,9 +212,46 @@ PdfOCRDiff/
 - 右上角 ⚙ 按钮打开设置弹窗
 - 可配置项:
   - 后端 OCR 服务地址（本地或远程）
-  - 中间列保存路径
+  - 项目保存路径（默认 ~/Downloads）
   - 自动保存间隔（秒）
 - 所有设置持久化到 localStorage
+
+### 项目保存格式（.ocrdiff 文件夹）
+OCR 过程中，实时将结果保存到 `~/Downloads/<文件名>.ocrdiff/` 文件夹：
+
+```
+example.ocrdiff/
+├── manifest.json   # 元数据 + 原始 OCR + 编辑历史
+└── pages/
+    ├── page_0000.png
+    └── ...
+```
+
+`manifest.json` 结构：
+```json
+{
+  "ocrdiff_version": 1,
+  "pdf_name": "example.pdf",
+  "dpi": 200,
+  "source": "remote_stream",
+  "total_pages": 10,
+  "created_at": "2026-04-26T...",
+  "base": {
+    "pages": [
+      { "page": 0, "image": "pages/page_0000.png", "text": "原始文字", "boxes": [], "scores": [] }
+    ]
+  },
+  "edits": [
+    { "page": 2, "text": "修改后文字", "version": 2, "modified_at": "2026-04-26T03:00:00" }
+  ]
+}
+```
+
+- `base.pages`：原始 OCR 结果，图片路径不变
+- `edits`：append-only 编辑历史数组，每次保存 push 新记录，不改历史
+- 加载时：取 `base.text`，按 `edits` 里该页最新 text 覆盖
+- 自动保存：每 10 秒将 dirty 的 edits 写入 manifest.json
+- 导出：打包为 `.ocrdiff.zip` 供分享
 
 ## 开发计划
 
@@ -223,4 +260,4 @@ PdfOCRDiff/
 3. **Phase 3** ✅: 前后端联调 (SSE + Diff 高亮 + 暂停/继续)
 4. **Phase 4** ✅: 中栏可编辑 + 自动保存 + 版本历史 + 设置弹窗
 5. **Phase 5** ✅: EPUB 解析 + Diff 移到前端本地（后端仅 OCR）
-6. **Phase 6**: 打包为 Mac 应用 (.dmg)
+6. **Phase 6** ✅: 打包为 Mac 应用 (.dmg)

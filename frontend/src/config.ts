@@ -13,9 +13,15 @@ export function setBackendUrl(url: string): void {
   localStorage.setItem(BACKEND_URL_KEY, url.replace(/\/+$/, ""));
 }
 
-// ---------- Save directory (for middle-column text) ----------
+// ---------- Save directory (for .ocrdiff project) ----------
 const SAVE_DIR_KEY = "pdfocrdiff_save_dir";
-const DEFAULT_SAVE_DIR = "";
+// Default to ~/Downloads on macOS
+const DEFAULT_SAVE_DIR = (() => {
+  if (typeof window !== "undefined" && navigator.platform.includes("Mac")) {
+    return "/Users/alexzzheng/Downloads";
+  }
+  return "";
+})();
 
 export function getSaveDir(): string {
   return localStorage.getItem(SAVE_DIR_KEY) || DEFAULT_SAVE_DIR;

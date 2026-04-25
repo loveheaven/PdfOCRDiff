@@ -1,52 +1,46 @@
+/**
+ * useEditorStore — pure UI state for the editable text panel.
+ *
+ * Only used in non-project mode (no .ocrdiff persistence).
+ * Handles: per-page text, dirty state, auto-save version creation.
+ *
+ * In project mode, useOcrDiffProject handles all of the above.
+ */
+
 import { useState, useCallback, useRef, useEffect } from "react";
-import { getAutoSaveInterval } from "../config";
 
 export interface TextVersion {
   version: number;
   text: string;
-  timestamp: number; // Date.now()
+  modified_at: string;
 }
 
-/**
- * Stores per-page editable text with auto-save and version history.
- * Key = page number.
- */
-interface PageStore {
-  /** Current (possibly edited) text */
+interface PageState {
   text: string;
-  /** Whether text has been modified since last save */
   dirty: boolean;
-  /** Saved versions (newest first) */
   versions: TextVersion[];
-  /** Next version number */
   nextVersion: number;
 }
 
 interface UseEditorStoreReturn {
-  /** Get the editable text for a page */
   getText: (page: number) => string;
-  /** Update text for a page (marks dirty) */
   setText: (page: number, text: string) => void;
-  /** Initialize a page with OCR text (only if not already present) */
   initPage: (page: number, ocrText: string) => void;
-  /** Manually save current page */
   save: (page: number) => void;
-  /** Get version history for a page */
-  getVersions: (page: number) => TextVersion[];
-  /** Restore a specific version */
-  restoreVersion: (page: number, version: number) => void;
-  /** Current version number for a page */
-  getCurrentVersion: (page: number) => number;
-  /** Whether a page has unsaved changes */
   isDirty: (page: number) => boolean;
+  getVersions: (page: number) => TextVersion[];
+  getCurrentVersion: (page: number) => number;
+  restoreVersion: (page: number, version: number) => void;
 }
 
+const AUTO_SAVE_INTERVAL_MS = 10 * 1000;
+
 export function useEditorStore(): UseEditorStoreReturn {
-  const [store, setStore] = useState<Map<number, PageStore>>(new Map());
+  const [store, setStore] = useState<Map<number, PageState>>(new Map());
   const storeRef = useRef(store);
   storeRef.current = store;
 
-  const getOrCreate = useCallback((page: number): PageStore => {
+  const getOrCreate = useCallback((page: number): PageState => {
     return storeRef.current.get(page) || {
       text: "",
       dirty: false,
@@ -72,7 +66,7 @@ export function useEditorStore(): UseEditorStoreReturn {
     setStore((prev) => {
       if (prev.has(page)) return prev; // don't overwrite edits
       const next = new Map(prev);
-      const v: TextVersion = { version: 1, text: ocrText, timestamp: Date.now() };
+      const v: TextVersion = { version: 1, text: ocrText, modified_at: new Date().toISOString() };
       next.set(page, {
         text: ocrText,
         dirty: false,
@@ -88,7 +82,7 @@ export function useEditorStore(): UseEditorStoreReturn {
       const ps = prev.get(page);
       if (!ps || !ps.dirty) return prev;
       const next = new Map(prev);
-      const v: TextVersion = { version: ps.nextVersion, text: ps.text, timestamp: Date.now() };
+      const v: TextVersion = { version: ps.nextVersion, text: ps.text, modified_at: new Date().toISOString() };
       next.set(page, {
         ...ps,
         dirty: false,
@@ -99,8 +93,17 @@ export function useEditorStore(): UseEditorStoreReturn {
     });
   }, []);
 
+  const isDirty = useCallback((page: number): boolean => {
+    return getOrCreate(page).dirty;
+  }, [getOrCreate]);
+
   const getVersions = useCallback((page: number): TextVersion[] => {
     return getOrCreate(page).versions;
+  }, [getOrCreate]);
+
+  const getCurrentVersion = useCallback((page: number): number => {
+    const ps = getOrCreate(page);
+    return ps.versions.length > 0 ? ps.versions[0].version : 0;
   }, [getOrCreate]);
 
   const restoreVersion = useCallback((page: number, version: number) => {
@@ -115,16 +118,7 @@ export function useEditorStore(): UseEditorStoreReturn {
     });
   }, []);
 
-  const getCurrentVersion = useCallback((page: number): number => {
-    const ps = getOrCreate(page);
-    return ps.versions.length > 0 ? ps.versions[0].version : 0;
-  }, [getOrCreate]);
-
-  const isDirty = useCallback((page: number): boolean => {
-    return getOrCreate(page).dirty;
-  }, [getOrCreate]);
-
-  // ---------- Auto-save timer ----------
+  // Auto-save: create new version for any dirty page
   useEffect(() => {
     const interval = setInterval(() => {
       const s = storeRef.current;
@@ -132,7 +126,7 @@ export function useEditorStore(): UseEditorStoreReturn {
       const next = new Map(s);
       for (const [page, ps] of s) {
         if (ps.dirty) {
-          const v: TextVersion = { version: ps.nextVersion, text: ps.text, timestamp: Date.now() };
+          const v: TextVersion = { version: ps.nextVersion, text: ps.text, modified_at: new Date().toISOString() };
           next.set(page, {
             ...ps,
             dirty: false,
@@ -143,7 +137,7 @@ export function useEditorStore(): UseEditorStoreReturn {
         }
       }
       if (changed) setStore(next);
-    }, getAutoSaveInterval() * 1000);
+    }, AUTO_SAVE_INTERVAL_MS);
 
     return () => clearInterval(interval);
   }, []);
@@ -153,9 +147,9 @@ export function useEditorStore(): UseEditorStoreReturn {
     setText,
     initPage,
     save,
-    getVersions,
-    restoreVersion,
-    getCurrentVersion,
     isDirty,
+    getVersions,
+    getCurrentVersion,
+    restoreVersion,
   };
 }

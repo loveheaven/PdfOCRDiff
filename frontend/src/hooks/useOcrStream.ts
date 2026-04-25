@@ -21,13 +21,20 @@ interface UseOcrStreamReturn {
   status: OcrStatus;
   error: string | null;
   uploadAndStart: (file: File) => Promise<void>;
+  /** Start SSE stream for an already-uploaded task */
+  startStream: (taskId: string, totalPages: number) => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   setCurrentPage: (page: number) => void;
   reset: () => void;
 }
 
-export function useOcrStream(): UseOcrStreamReturn {
+interface UseOcrStreamOptions {
+  /** Called for each page result as it arrives from SSE (for side-effects like saving to disk) */
+  onPageResult?: (result: OcrPageResult) => void;
+}
+
+export function useOcrStream(options?: UseOcrStreamOptions): UseOcrStreamReturn {
   const [pages, setPages] = useState<Map<number, OcrPageResult>>(new Map());
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
@@ -37,6 +44,8 @@ export function useOcrStream(): UseOcrStreamReturn {
 
   const taskIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const onPageResultRef = useRef(options?.onPageResult);
+  onPageResultRef.current = options?.onPageResult;
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
@@ -106,6 +115,7 @@ export function useOcrStream(): UseOcrStreamReturn {
             });
             setCurrentPage(pageResult.page);
             setCompletedCount((prev) => prev + 1);
+            onPageResultRef.current?.(pageResult);
           } catch {
             // skip malformed JSON
           }
@@ -151,6 +161,19 @@ export function useOcrStream(): UseOcrStreamReturn {
       setStatus("idle");
     }
   }, [reset, connectStream]);
+
+  /** Start SSE stream for a known task_id (totalPages already set externally) */
+  const startStream = useCallback(
+    async (taskId: string, totalPages: number) => {
+      reset();
+      taskIdRef.current = taskId;
+      setTotalPages(totalPages);
+      setStatus("processing");
+      setError(null);
+      await connectStream(taskId, 0);
+    },
+    [reset, connectStream],
+  );
 
   const pause = useCallback(async () => {
     const taskId = taskIdRef.current;
@@ -200,6 +223,7 @@ export function useOcrStream(): UseOcrStreamReturn {
     status,
     error,
     uploadAndStart,
+    startStream,
     pause,
     resume,
     setCurrentPage,

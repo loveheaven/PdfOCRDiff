@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { DiffSegment } from "../hooks/useDiff";
-import type { TextVersion } from "../hooks/useEditorStore";
+import type { TextVersion } from "../hooks/useOcrDiffProject";
 
 interface EditablePanelProps {
   /** Current editable text for this page */
@@ -153,7 +153,7 @@ export default function EditablePanel({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-gray-700">v{v.version}</span>
                   <span className="text-[10px] text-gray-400">
-                    {new Date(v.timestamp).toLocaleTimeString()}
+                    {new Date(v.modified_at).toLocaleTimeString()}
                   </span>
                 </div>
                 <div className="text-[10px] text-gray-400 mt-0.5 truncate">

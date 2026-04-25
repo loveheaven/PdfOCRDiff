@@ -1,39 +1,66 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import SettingsBar from "./components/SettingsBar";
 import SettingsDialog from "./components/SettingsDialog";
 import PdfPanel from "./components/PdfPanel";
 import EditablePanel from "./components/EditablePanel";
 import DiffPanel from "./components/DiffPanel";
 import EpubPanel from "./components/EpubPanel";
-import { useOcrStream } from "./hooks/useOcrStream";
+import { useOcrStream, type OcrPageResult } from "./hooks/useOcrStream";
+import { useOcrDiffProject } from "./hooks/useOcrDiffProject";
+import { useEditorStore } from "./hooks/useEditorStore";
 import { useEpub } from "./hooks/useEpub";
 import { useDiff } from "./hooks/useDiff";
-import { useEditorStore } from "./hooks/useEditorStore";
 
 function App() {
-  const ocr = useOcrStream();
+  const ocrProject = useOcrDiffProject();
   const epub = useEpub();
   const diff = useDiff();
   const editor = useEditorStore();
 
+  const [currentPage, setCurrentPage] = useState(0);
   const [epubChapter, setEpubChapter] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Initialize editor text when OCR results arrive
-  useEffect(() => {
-    for (const [pageNum, result] of ocr.pages) {
-      editor.initPage(pageNum, result.text);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ocr.pages]);
+  // Determine data source
+  const useProjectSource = ocrProject.hasProject;
 
-  // Current editor text (possibly edited by user)
-  const currentEditorText = editor.getText(ocr.currentPage);
+  // Wire up useOcrStream with page result callback to save images and add base pages
+  const ocr = useOcrStream({
+    onPageResult: async (result: OcrPageResult) => {
+      if (!ocrProject.hasProject) return;
+      await ocrProject.savePageImage(result.page, result.image);
+      ocrProject.addBasePage({
+        page: result.page,
+        image: `pages/page_${String(result.page).padStart(4, "0")}.png`,
+        text: result.text,
+        boxes: result.boxes,
+        scores: result.scores,
+      });
+    },
+  });
+
+  // When OCR stream completes, flush pending edits and persist manifest
+  useEffect(() => {
+    if (ocr.status === "done" && ocrProject.hasProject) {
+      ocrProject.saveAll();
+    }
+  }, [ocr.status, ocrProject.hasProject]);
+
+  // Sync currentPage with ocr stream when not in project mode
+  useEffect(() => {
+    if (!useProjectSource) setCurrentPage(ocr.currentPage);
+  }, [ocr.currentPage, useProjectSource]);
+
+  // Current editor text
+  const currentEditorText = useMemo(() => {
+    if (useProjectSource) return ocrProject.getPageText(currentPage);
+    return editor.getText(currentPage);
+  }, [useProjectSource, currentPage, ocrProject, editor]);
 
   // Current EPUB text
   const currentEpubText = epub.chapters[epubChapter]?.text || "";
 
-  // Auto-compute diff when both texts are available
+  // Auto-compute diff
   useEffect(() => {
     if (currentEditorText && currentEpubText) {
       diff.computeDiff(currentEditorText, currentEpubText);
@@ -43,33 +70,83 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentEditorText, currentEpubText]);
 
-  // Build allPagesText map for EditablePanel
+  // Build allPagesText map
   const allPagesText = new Map<number, string>();
-  for (let i = 0; i < ocr.totalPages; i++) {
-    allPagesText.set(i, editor.getText(i));
+  const totalPages = useProjectSource ? (ocrProject.manifest?.total_pages ?? 0) : ocr.totalPages;
+  for (let i = 0; i < totalPages; i++) {
+    if (useProjectSource) {
+      allPagesText.set(i, ocrProject.getPageText(i));
+    } else {
+      allPagesText.set(i, editor.getText(i));
+    }
   }
+
+  // When user edits text
+  const handleTextChange = (text: string) => {
+    if (useProjectSource) {
+      ocrProject.updatePendingText(currentPage, text);
+    } else {
+      editor.setText(currentPage, text);
+    }
+  };
+
+  // When user saves manually
+  const handleSave = () => {
+    if (useProjectSource) {
+      ocrProject.save(currentPage);
+      ocrProject.saveAll();
+    } else {
+      editor.save(currentPage);
+    }
+  };
+
+  // When user restores a version
+  const handleRestoreVersion = (version: number) => {
+    if (useProjectSource) {
+      ocrProject.restoreVersion(currentPage, version);
+    } else {
+      editor.restoreVersion(currentPage, version);
+    }
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    if (!useProjectSource) ocr.setCurrentPage(page);
+  };
+
+  // Load .ocrdiff zip file
+  const handleLoadOcrDiff = async (file: File) => {
+    await ocrProject.loadZipFile(file);
+  };
 
   return (
     <div className="flex flex-col h-screen">
       {/* Top bar */}
-      <SettingsBar onOpenSettings={() => setSettingsOpen(true)} />
+      <SettingsBar
+        onOpenSettings={() => setSettingsOpen(true)}
+        onLoadOcrDiff={handleLoadOcrDiff}
+        onExport={ocrProject.hasManifest ? ocrProject.exportZip : undefined}
+        ocrDiffLoading={ocrProject.isLoading || ocrProject.isSaving}
+        ocrDiffName={ocrProject.manifest?.pdf_name ?? null}
+        isProjectMode={ocrProject.hasProject}
+      />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {/* Three-column layout */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: PDF thumbnails */}
+        {/* Left: PDF page images */}
         <div className="w-1/4 border-r border-gray-300 flex flex-col min-h-0">
           <PdfPanel
-            pages={ocr.pages}
-            currentPage={ocr.currentPage}
-            totalPages={ocr.totalPages}
-            completedCount={ocr.completedCount}
-            status={ocr.status}
-            error={ocr.error}
-            onUpload={(file) => ocr.uploadAndStart(file)}
-            onPause={() => ocr.pause()}
-            onResume={() => ocr.resume()}
-            onPageChange={(page) => ocr.setCurrentPage(page)}
+            pages={useProjectSource ? ocrProject.pages : ocr.pages}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            completedCount={useProjectSource ? ocrProject.pages.size : ocr.completedCount}
+            status={useProjectSource ? "done" : ocr.status}
+            error={useProjectSource ? ocrProject.error : ocr.error}
+            onUpload={handleUpload}
+            onPause={ocr.pause}
+            onResume={ocr.resume}
+            onPageChange={handlePageChange}
           />
         </div>
 
@@ -77,18 +154,18 @@ function App() {
         <div className="w-[37.5%] border-r border-gray-300 flex flex-col min-h-0">
           <EditablePanel
             text={currentEditorText}
-            onTextChange={(t) => editor.setText(ocr.currentPage, t)}
-            onSave={() => editor.save(ocr.currentPage)}
+            onTextChange={handleTextChange}
+            onSave={handleSave}
             diffs={diff.diffs}
             isComputing={diff.isComputing}
-            dirty={editor.isDirty(ocr.currentPage)}
-            currentVersion={editor.getCurrentVersion(ocr.currentPage)}
-            versions={editor.getVersions(ocr.currentPage)}
-            onRestoreVersion={(v) => editor.restoreVersion(ocr.currentPage, v)}
+            dirty={useProjectSource ? ocrProject.isDirty(currentPage) : editor.isDirty(currentPage)}
+            currentVersion={useProjectSource ? ocrProject.getPageVersion(currentPage) : editor.getCurrentVersion(currentPage)}
+            versions={useProjectSource ? ocrProject.getVersions(currentPage) : editor.getVersions(currentPage)}
+            onRestoreVersion={handleRestoreVersion}
             allPagesText={allPagesText}
-            totalPages={ocr.totalPages}
-            currentPage={ocr.currentPage}
-            onPageChange={(page) => ocr.setCurrentPage(page)}
+            totalPages={totalPages}
+            currentPage={currentPage}
+            onPageChange={handlePageChange}
           />
         </div>
 
@@ -115,6 +192,30 @@ function App() {
       </div>
     </div>
   );
+
+  // Upload handler — creates project BEFORE starting stream
+  async function handleUpload(file: File) {
+    ocrProject.closeProject();
+    ocr.reset();
+
+    const backendUrl = (await import("./config")).getBackendUrl();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const uploadRes = await fetch(`${backendUrl}/ocr/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.statusText}`);
+      const { task_id, total_pages } = await uploadRes.json();
+
+      await ocrProject.createProject(file.name, total_pages);
+      ocr.startStream(task_id, total_pages);
+    } catch (err) {
+      console.error("Upload failed:", err);
+    }
+  }
 }
 
 export default App;

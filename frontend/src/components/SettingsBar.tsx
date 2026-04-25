@@ -56,7 +56,7 @@ export default function SettingsBar({
         <input
           ref={fileRef}
           type="file"
-          accept=".ocrdiff,.ocrdiff.zip"
+          accept=".ocrdiff,.ocrdiff.zip,application/zip,application/x-zip-compressed"
           className="hidden"
           onChange={handleFileChange}
         />

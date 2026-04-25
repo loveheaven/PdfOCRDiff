@@ -269,7 +269,7 @@ export function useOcrDiffProject(): UseOcrDiffProjectReturn {
         flushPendingEdits();
         const currentManifest = manifestRef.current;
         if (currentManifest) {
-          await dbPut(STORE_MANIFEST, { projectPath: projectPathRef.current, ...currentManifest }, projectPathRef.current);
+          await dbPut(STORE_MANIFEST, { projectPath: projectPathRef.current, ...currentManifest });
         }
       } catch (err) {
         console.error("Auto-save failed:", err);
@@ -304,7 +304,7 @@ export function useOcrDiffProject(): UseOcrDiffProjectReturn {
         edits: [],
       };
 
-      await dbPut(STORE_MANIFEST, { projectPath: folderName, ...newManifest }, folderName);
+      await dbPut(STORE_MANIFEST, { projectPath: folderName, ...newManifest });
       setProjectPath(folderName);
       setManifest(newManifest);
       setPageImages(new Map());
@@ -380,7 +380,7 @@ export function useOcrDiffProject(): UseOcrDiffProjectReturn {
       flushPendingEdits();
       const currentManifest = manifestRef.current;
       if (currentManifest) {
-        await dbPut(STORE_MANIFEST, { projectPath, ...currentManifest }, projectPath);
+        await dbPut(STORE_MANIFEST, { projectPath, ...currentManifest });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -505,7 +505,7 @@ export function useOcrDiffProject(): UseOcrDiffProjectReturn {
       const safeName = loadedManifest.pdf_name.replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, "_");
       const folderName = `${safeName}_import_${Date.now()}`;
 
-      await dbPut(STORE_MANIFEST, { projectPath: folderName, ...loadedManifest }, folderName);
+      await dbPut(STORE_MANIFEST, { projectPath: folderName, ...loadedManifest });
 
       const images = new Map<number, string>();
       for (const [name, zipEntry] of Object.entries(zip.files)) {

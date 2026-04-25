@@ -57,6 +57,8 @@ import numpy as np
 from PIL import Image
 import io
 
+import transformers
+print(f"Transformers版本: {transformers.__version__}")
 
 def create_ocr_engine(lang: str, engine: str, device: str):
     """Create PaddleOCR instance."""
@@ -68,6 +70,7 @@ def create_ocr_engine(lang: str, engine: str, device: str):
         use_textline_orientation=False,
         # engine and device are ignored here; the classic ocr() API
         # routes to the appropriate backend automatically.
+        engine=engine,
     )
 
 
@@ -85,18 +88,25 @@ def ocr_png_bytes(ocr, png_bytes: bytes):
     image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     img_array = np.array(image)
 
-    # Use ocr() method which returns [(box, (text, score)), ...]
-    # This avoids the PIR bug in predict() API
-    results = ocr.ocr(img_array)
+    # predict() returns an iterable of result objects; print(result) emits result.json
+    results = ocr.predict(img_array)
 
     boxes, texts, scores = [], [], []
-    if results and results[0]:
-        for line in results[0]:
-            poly = line[0]  # [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-            text, score = line[1]
-            boxes.append([[float(p[0]), float(p[1])] for p in poly])
-            texts.append(text)
-            scores.append(float(score))
+    for res in results:
+        json_data = res.json
+        # rec_polys: filtered detection boxes (after score threshold), shape (4, 2), dtype int16
+        # rec_texts: recognized texts (already filtered by text_rec_score_thresh)
+        # rec_scores: confidence scores corresponding to rec_texts
+        if "rec_polys" in json_data and "rec_texts" in json_data and "rec_scores" in json_data:
+            for poly, text, score in zip(
+                json_data["rec_polys"],
+                json_data["rec_texts"],
+                json_data["rec_scores"],
+            ):
+                # poly is numpy array shape (4, 2), dtype int16
+                boxes.append([[float(p[0]), float(p[1])] for p in poly])
+                texts.append(text)
+                scores.append(float(score))
     return boxes, texts, scores
 
 

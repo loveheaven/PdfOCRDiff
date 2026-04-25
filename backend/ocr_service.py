@@ -53,15 +53,17 @@ def ocr_image_bytes(image_bytes: bytes) -> tuple[list[list[list[float]]], list[s
 
     for res in results:
         json_data = res.json
-        if "rec_texts" in json_data and "rec_scores" in json_data and "dt_polys" in json_data:
-            for text, score, poly in zip(
+        # rec_polys: filtered boxes after score thresholding (correspond to rec_texts)
+        # dt_polys: all detected boxes (before score filtering)
+        if "rec_polys" in json_data and "rec_texts" in json_data and "rec_scores" in json_data:
+            for poly, text, score in zip(
+                json_data["rec_polys"],
                 json_data["rec_texts"],
                 json_data["rec_scores"],
-                json_data["dt_polys"],
             ):
+                boxes.append([[float(p[0]), float(p[1])] for p in poly])
                 texts.append(text)
                 scores.append(float(score))
-                boxes.append([[float(p[0]), float(p[1])] for p in poly])
 
     return boxes, texts, scores
 

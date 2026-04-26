@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import SettingsBar from "./components/SettingsBar";
 import SettingsDialog from "./components/SettingsDialog";
 import PdfPanel from "./components/PdfPanel";
@@ -21,6 +21,35 @@ function App() {
   const [epubChapter, setEpubChapter] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showComparePanel, setShowComparePanel] = useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(25); // percent
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+
+  // Drag to resize left panel
+  const handleDividerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const newWidth = ((e.clientX - rect.left) / rect.width) * 100;
+      setLeftPanelWidth(Math.min(55, Math.max(15, newWidth)));
+    };
+
+    const handleMouseUp = () => {
+      isDraggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
 
   // Determine data source
   const useProjectSource = ocrProject.hasProject;
@@ -34,6 +63,8 @@ function App() {
         page: result.page,
         image: `pages/page_${String(result.page).padStart(4, "0")}.png`,
         text: result.text,
+        markdown_texts: result.markdown_texts,
+        page_continuation_flags: result.page_continuation_flags,
         boxes: result.boxes,
         scores: result.scores,
       });
@@ -136,14 +167,16 @@ function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {/* Three-column layout */}
-      <div className="flex flex-1 min-h-0">
+      <div ref={containerRef} className="flex flex-1 min-h-0">
         {/* Left: PDF page images */}
-        <div className="w-1/4 border-r border-gray-300 flex flex-col min-h-0">
+        <div
+          style={{ width: `${leftPanelWidth}%` }}
+          className="flex flex-col min-h-0"
+        >
           <PdfPanel
             pages={useProjectSource ? ocrProject.pages : ocr.pages}
             currentPage={currentPage}
             totalPages={totalPages}
-            completedCount={useProjectSource ? ocrProject.pages.size : ocr.completedCount}
             status={useProjectSource ? "done" : ocr.status}
             error={useProjectSource ? ocrProject.error : ocr.error}
             onUpload={handleUpload}
@@ -152,6 +185,13 @@ function App() {
             onPageChange={handlePageChange}
           />
         </div>
+
+        {/* Draggable divider */}
+        <div
+          onMouseDown={handleDividerMouseDown}
+          className="w-1 cursor-col-resize bg-gray-300 hover:bg-blue-400 active:bg-blue-500 shrink-0 transition-colors"
+          title="拖动调整宽度"
+        />
 
         {/* Middle: Editable OCR text */}
         <div className="flex-1 border-r border-gray-300 flex flex-col min-h-0">

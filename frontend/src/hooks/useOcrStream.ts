@@ -6,6 +6,8 @@ export interface OcrPageResult {
   total_pages: number;
   image: string; // base64 data URI
   text: string;
+  markdown_texts?: string;
+  page_continuation_flags?: boolean[];
   boxes: number[][];
   scores: number[];
 }

@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { DiffSegment } from "../hooks/useDiff";
 import type { TextVersion } from "../hooks/useOcrDiffProject";
 
@@ -47,6 +49,7 @@ export default function EditablePanel({
 }: EditablePanelProps) {
   const [showVersions, setShowVersions] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [markdownMode, setMarkdownMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
@@ -118,6 +121,15 @@ export default function EditablePanel({
             }`}
           >
             {editMode ? "预览" : "编辑"}
+          </button>
+          <button
+            onClick={() => setMarkdownMode(!markdownMode)}
+            className={`px-2 py-1 text-xs rounded border transition-colors ${
+              markdownMode ? "bg-purple-600 text-white border-purple-600" : "border-gray-300 hover:bg-gray-100"
+            }`}
+            title="Markdown 渲染"
+          >
+            MD
           </button>
           <button
             onClick={onSave}
@@ -207,7 +219,15 @@ export default function EditablePanel({
                   </div>
                   {pageText ? (
                     <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                      {isCurrentPage ? renderDiffContent() : pageText}
+                      {isCurrentPage && markdownMode ? (
+                        <div className="prose prose-sm max-w-none">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                        </div>
+                      ) : isCurrentPage ? (
+                        renderDiffContent()
+                      ) : (
+                        pageText
+                      )}
                     </div>
                   ) : (
                     <div className="text-gray-300 text-xs italic">尚未识别</div>

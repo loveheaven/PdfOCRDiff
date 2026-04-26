@@ -55,7 +55,17 @@ from PIL import Image
 import io
 
 
-def create_ocr_engine(lang: str, engine: str, device: str):
+def create_ocr_engine(lang: str, engine: str, device: str, structure = True):
+    if structure:
+        from paddleocr import PPStructureV3
+        return PPStructureV3(
+            lang=lang,
+            engine=engine,
+            use_formula_recognition=False,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
     """Create PaddleOCR instance."""
     from paddleocr import PaddleOCR
     return PaddleOCR(
@@ -78,7 +88,7 @@ def render_page(doc, page_num: int, dpi: int) -> bytes:
     return pix.tobytes("png")
 
 
-def ocr_png_bytes(ocr, png_bytes: bytes):
+def ocr_png_bytes(ocr, png_bytes: bytes, page_num):
     """Run OCR on PNG bytes, return (boxes, texts, scores)."""
     image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     img_array = np.array(image)
@@ -88,9 +98,16 @@ def ocr_png_bytes(ocr, png_bytes: bytes):
     results = ocr.predict(img_array)
     # print(results)
 
-    boxes, texts, scores = [], [], []
+    boxes, texts, scores, markdown_texts, page_continuation_flags = [], [], [], "", []
     if results:
         for line in results:
+            # line.save_to_json(f'{page_num}.json')
+            markdown_texts = line.markdown['markdown_texts']
+            # print(line.markdown['markdown_texts'])
+            for p in line.markdown['page_continuation_flags']:
+                page_continuation_flags.append( 1 if p else 0)
+
+            line = line['overall_ocr_res']
             for poly, text, score in zip(
                 line["rec_polys"],
                 line["rec_texts"],
@@ -102,7 +119,7 @@ def ocr_png_bytes(ocr, png_bytes: bytes):
                 # print(text, len(poly), boxes)
 
                 scores.append(float(score))
-    return boxes, texts, scores
+    return boxes, texts, scores, markdown_texts, page_continuation_flags
 
 
 def parse_page_range(page_range: str, total: int) -> list[int]:
@@ -178,7 +195,7 @@ def main():
             png_bytes = render_page(doc, page_num, args.dpi)
 
             # OCR
-            boxes, texts, scores = ocr_png_bytes(ocr, png_bytes)
+            boxes, texts, scores, markdown_texts, page_continuation_flags = ocr_png_bytes(ocr, png_bytes, page_num)
             full_text = "\n".join(texts)
 
             # Write image to zip
@@ -192,6 +209,8 @@ def main():
                 "text": full_text,
                 "boxes": boxes,
                 "scores": scores,
+                "markdown_texts": markdown_texts,
+                "page_continuation_flags": page_continuation_flags,
             })
 
             elapsed = time.time() - t0

@@ -22,6 +22,8 @@ export interface OcrPageBase {
   page: number;
   image: string;
   text: string;
+  markdown_texts?: string;   // ocr_cli field name (plural)
+  page_continuation_flags?: number[];
   boxes: number[][];
   scores: number[];
 }
@@ -57,6 +59,8 @@ export interface OcrPageResult {
   total_pages: number;
   image: string;
   text: string;
+  markdown_texts?: string;
+  page_continuation_flags?: number[];
   boxes: number[][];
   scores: number[];
 }
@@ -154,12 +158,19 @@ function blobToDataUri(blob: Blob): Promise<string> {
 }
 
 function getBaseText(manifest: OcrDiffManifest, pageNum: number): string {
-  return manifest.base.pages.find((p) => p.page === pageNum)?.text ?? "";
+  const page = manifest.base.pages.find((p) => p.page === pageNum);
+  if (!page) return "";
+  // Prefer markdown_text if available
+  if (page.markdown_texts) return page.markdown_texts;
+  return page.text;
 }
 
 function getLatestEditText(manifest: OcrDiffManifest, pageNum: number): string {
   const pageEdits = manifest.edits.filter((e) => e.page === pageNum);
   if (pageEdits.length === 0) return getBaseText(manifest, pageNum);
+  // Prefer markdown_text from base over edit text
+  const baseMarkdown = manifest.base.pages.find((p) => p.page === pageNum)?.markdown_texts;
+  if (baseMarkdown) return baseMarkdown;
   return pageEdits.reduce((a, b) => (a.version > b.version ? a : b)).text;
 }
 
@@ -183,6 +194,8 @@ function buildPagesMap(
       total_pages: manifest.total_pages,
       image: pageImages.get(basePage.page) ?? "",
       text,
+      markdown_texts: basePage.markdown_texts,
+      page_continuation_flags: basePage.page_continuation_flags,
       boxes: basePage.boxes,
       scores: basePage.scores,
     });

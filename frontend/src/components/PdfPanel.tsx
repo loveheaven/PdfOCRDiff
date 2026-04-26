@@ -1,11 +1,10 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import type { OcrPageResult, OcrStatus } from "../hooks/useOcrStream";
 
 interface PdfPanelProps {
   pages: Map<number, OcrPageResult>;
   currentPage: number;
   totalPages: number;
-  completedCount: number;
   status: OcrStatus;
   error: string | null;
   onUpload: (file: File) => void;
@@ -18,7 +17,6 @@ export default function PdfPanel({
   pages,
   currentPage,
   totalPages,
-  completedCount,
   status,
   error,
   onUpload,
@@ -28,6 +26,31 @@ export default function PdfPanel({
 }: PdfPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [pageInput, setPageInput] = useState(String(currentPage + 1));
+
+  // Sync input when currentPage changes
+  useEffect(() => {
+    setPageInput(String(currentPage + 1));
+  }, [currentPage]);
+
+  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Only allow positive integers
+    const val = e.target.value.replace(/\D/g, "");
+    setPageInput(val);
+  };
+
+  const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      const page = parseInt(pageInput, 10);
+      if (!isNaN(page) && page >= 1 && page <= totalPages) {
+        onPageChange(page - 1);
+        // Blur to confirm and hide mobile keyboard
+        (e.target as HTMLInputElement).blur();
+      } else {
+        setPageInput(String(currentPage + 1));
+      }
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -48,7 +71,7 @@ export default function PdfPanel({
   // Scroll selected thumbnail into view
   useEffect(() => {
     const el = listRef.current?.querySelector(`[data-page="${currentPage}"]`);
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    el?.scrollIntoView({ block: "center", behavior: "auto" });
   }, [currentPage]);
 
   let buttonLabel: string;
@@ -79,9 +102,6 @@ export default function PdfPanel({
       {/* Header */}
       <div className="flex items-center gap-2 p-3 border-b border-gray-200 bg-white shrink-0">
         <h2 className="text-sm font-semibold text-gray-700">PDF / OCR</h2>
-        {totalPages > 0 && (
-          <span className="text-xs text-gray-500 ml-1">{completedCount}/{totalPages}</span>
-        )}
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={handleActionClick}
@@ -99,25 +119,25 @@ export default function PdfPanel({
         />
       </div>
 
-      {/* Progress bar */}
-      {totalPages > 0 && status !== "idle" && (
-        <div className="px-3 py-2 bg-blue-50 border-b border-blue-100 shrink-0">
-          <div className="flex items-center justify-between text-xs mb-1">
-            <span className={status === "paused" ? "text-yellow-700" : status === "done" ? "text-green-700" : "text-blue-700"}>
-              {status === "processing" && "正在识别..."}
-              {status === "paused" && "已暂停"}
-              {status === "done" && "识别完成"}
-            </span>
-            <span className="text-gray-600">{completedCount} / {totalPages} 页</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-1.5">
-            <div
-              className={`h-1.5 rounded-full transition-all duration-300 ${
-                status === "done" ? "bg-green-500" : status === "paused" ? "bg-yellow-500" : "bg-blue-600"
-              }`}
-              style={{ width: `${(completedCount / totalPages) * 100}%` }}
-            />
-          </div>
+      {/* Status + page jump */}
+      {totalPages > 0 && (
+        <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 shrink-0 flex items-center gap-2">
+          <span className="text-xs text-gray-500">
+            {status === "processing" && "识别中..."}
+            {status === "paused" && "已暂停"}
+            {status === "done" && "已完成"}
+            {status === "idle" && "空闲"}
+          </span>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={pageInput}
+            onChange={handlePageInputChange}
+            onKeyDown={handlePageInputKeyDown}
+            className="ml-auto w-14 px-2 py-1 text-center border border-gray-300 rounded text-xs"
+          />
+          <span className="text-xs text-gray-500">/ {totalPages} 页</span>
         </div>
       )}
 

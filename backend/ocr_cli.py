@@ -61,6 +61,7 @@ def create_ocr_engine(lang: str, engine: str, device: str, structure = True):
         return PPStructureV3(
             lang=lang,
             engine=engine,
+            format_block_content = True,
             use_formula_recognition=False,
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
